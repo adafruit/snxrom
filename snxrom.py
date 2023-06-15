@@ -113,15 +113,13 @@ class EyeBitmap(LittleEndianStructure):
             ('pixels', c_uint16 * 16384)
     ]
 
-def cast_after(o, cls, extra=0):
-    r = byref(o, sizeof(o) + extra)
+def castAt(o, cls):
+    r = byref(o, 0)
     return cast(r, POINTER(cls))[0]
 
-class MarkTable(CReprMixin, LittleEndianStructure):
-    _fields_ = [
-            ('tableLength', c_uint16),
-            ('tableWords', c_uint16 * 1),
-    ]
+def castAfter(o, cls):
+    r = byref(o, sizeof(o))
+    return cast(r, POINTER(cls))[0]
 
 def parseMarkTable(data):
     i = 0
@@ -134,6 +132,9 @@ def parseMarkTable(data):
             durationUpper = data[i] & 0x7fff
             durationLower = data[i+1]
             duration = (durationUpper << 16) | durationLower
+            print(duration)
+            if duration == 0x7fffffff:
+                break
             identifier = data[i+2]
             i += 3
         yield duration, identifier
@@ -148,7 +149,7 @@ class SNXRom:
     audioHeaders: list[AudioHeader]
     audioData: list[bytes]
 
-    def save_directory(self, path: pathlib.Path):
+    def saveDirectory(self, path: pathlib.Path):
         path.mkdir(parents=True, exist_ok=True)
         story = {
                 'storyId': self.metadata.storyId,
@@ -169,16 +170,16 @@ class SNXRom:
                 f.write(data)
 
     @classmethod
-    def fromfile(cls, filename):
+    def fromFile(cls, filename):
         with open(filename, "rb") as f:
             content = f.read()
-        return cls.fromdata(content)
+        return cls.fromBuffer(content)
 
     @classmethod
-    def fromdata(cls, data):
+    def fromBuffer(cls, data):
         content = bytearray(data)
         header = SNXROMHeader.from_buffer(content)
-        assetTablePointers = cast_after(header, c_uint32 * header.assetTableLength);
+        assetTablePointers = castAfter(header, c_uint32 * header.assetTableLength);
 
         metadata: ROMMetadata | None = None
         audioHeaders: list[AudioHeader] = []
@@ -193,14 +194,17 @@ class SNXRom:
                 audioHeader = AudioHeader.from_buffer(content, o)
                 audioHeaders.append(audioHeader)
                 print(audioHeader)
-                markTableLength = cast_after(audioHeader, c_uint16 * 1)
-                markTableData = cast_after(markTableLength, c_uint16 * markTableLength[0])
+                markTableLength = castAfter(audioHeader, c_uint16 * 1)
+                markTableData = castAfter(markTableLength, c_uint16 * (markTableLength[0]-1))
                 marks.append(list(parseMarkTable(markTableData)))
-                audiodata_c = cast_after(audioHeader, c_uint16 * (audioHeader.sizeOfAudioBinary), audioHeader.headerSize * 2)
+                audiodata_c = castAfter(
+                        castAt(audioHeader, c_uint16 * audioHeader.headerSize),
+                        c_uint16 * (audioHeader.sizeOfAudioBinary))
+                print(marks[-1])
                 print(markTableLength[0])
                 print(addressof(audioHeader))
                 print(addressof(markTableData))
-                print(addressof(cast_after(markTableData, c_uint16 * 1)))
+                print(addressof(castAfter(markTableData, c_uint16 * 1)))
                 print(addressof(audiodata_c))
                 audioData.append(bytes(audiodata_c))
 
@@ -211,10 +215,10 @@ class SNXRom:
         if metadata is not None:
             base = metadata
             for i in range(metadata.numberOfEyeAnimations):
-                base = eye = cast_after(base, EyeAnimationMetadata)
+                base = eye = castAfter(base, EyeAnimationMetadata)
                 eyeAnimations.append(eye)
             for i in range(metadata.numberOfVideoSequences):
-                base = seq = cast_after(base, VideoAudioSequenceMetadata)
+                base = seq = castAfter(base, VideoAudioSequenceMetadata)
                 videoAudioSequences.append(seq)
 
             for e in eyeAnimations:
@@ -226,6 +230,6 @@ class SNXRom:
         return cls(metadata=metadata, eyeAnimations=eyeAnimations, eyeImages=eyeImages, videoAudioSequences=videoAudioSequences, marks=marks, audioHeaders=audioHeaders, audioData=audioData)
 
 if __name__ == '__main__':
-    rom = SNXRom.fromfile('assets/Story01.bin')
-    rom.save_directory(pathlib.Path('story01_out'))
+    rom = SNXRom.fromFile('assets/Story01.bin')
+    rom.saveDirectory(pathlib.Path('story01_out'))
     #rom.save_bin('intro_out.bin')

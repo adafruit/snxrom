@@ -80,7 +80,7 @@ class VideoAudioSequenceMetadata(CReprMixin, LittleEndianStructure):
             for k in ['videoId', 'startAudioId', 'numberOfAudioBlocks'])
 
 class AudioHeader(CReprMixin, LittleEndianStructure):
-    _hide_ = ['AU']
+    _hide_ = ['AU', 'padding']
     _fields_ = [
             ('AU', c_uint8 * 2),
             ('sampleRate', c_uint16),
@@ -95,7 +95,7 @@ class AudioHeader(CReprMixin, LittleEndianStructure):
             ('rec', c_uint16),
             ('headerSize', c_uint16),
             ('audio32Type', c_uint16),
-            #('stopCode', c_uint16),
+            ('padding', c_uint16),
             #('sHeader', c_uint16),
     ]
 
@@ -132,12 +132,17 @@ def parseMarkTable(data):
             durationUpper = data[i] & 0x7fff
             durationLower = data[i+1]
             duration = (durationUpper << 16) | durationLower
-            print(duration)
             if duration == 0x7fffffff:
                 break
             identifier = data[i+2]
             i += 3
         yield duration, identifier
+
+def fakeheader(header: AudioHeader):
+    h = AudioHeader.from_buffer_copy(header)
+    h.markFlag = 0
+    h.headerSize = 16
+    return bytes(h)
 
 @dataclass
 class SNXRom:
@@ -155,7 +160,6 @@ class SNXRom:
                 'storyId': self.metadata.storyId,
                 'eyeAnimations': [animation.todict() for animation in self.eyeAnimations],
                 'videoAudioSequences': [vas.todict() for vas in self.videoAudioSequences],
-                'audioHeaders': [ah.todict() for ah in self.audioHeaders],
                 'marks': self.marks
                 }
 
@@ -165,8 +169,9 @@ class SNXRom:
         for i, img in self.eyeImages.items():
             img.save(path / f"eye{i:03d}.png")
 
-        for i, data in enumerate(self.audioData):
+        for i, (header, data) in enumerate(zip(self.audioHeaders, self.audioData)):
             with (path / f"audio{i:03d}.bin").open("wb") as f:
+                f.write(fakeheader(header))
                 f.write(data)
 
     @classmethod
@@ -193,19 +198,12 @@ class SNXRom:
             if asset_type.value == AU:
                 audioHeader = AudioHeader.from_buffer(content, o)
                 audioHeaders.append(audioHeader)
-                print(audioHeader)
                 markTableLength = castAfter(audioHeader, c_uint16 * 1)
                 markTableData = castAfter(markTableLength, c_uint16 * (markTableLength[0]-1))
                 marks.append(list(parseMarkTable(markTableData)))
                 audiodata_c = castAfter(
                         castAt(audioHeader, c_uint16 * audioHeader.headerSize),
                         c_uint16 * (audioHeader.sizeOfAudioBinary))
-                print(marks[-1])
-                print(markTableLength[0])
-                print(addressof(audioHeader))
-                print(addressof(markTableData))
-                print(addressof(castAfter(markTableData, c_uint16 * 1)))
-                print(addressof(audiodata_c))
                 audioData.append(bytes(audiodata_c))
 
         eyeAnimations: list[EyeAnimationMetadata] = []

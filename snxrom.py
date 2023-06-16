@@ -153,7 +153,7 @@ def makeSNXROMHeader(n_asset):
     return result
 
 def makeEyeData(eyeImage):
-    return b'\0' * 128 * 128 * 2
+    return b'\x41\x55' * 128 * 128
 
 def makeAudioAsset(header, data):
     return b'\0'
@@ -179,6 +179,7 @@ class SNXRom:
         result.fileSizeUpper = 0 # to be filled
         result.fileSizeLower = 0 # to be filled
         result.unknown_ff[:] = b'\xff' * 16
+        # TODO add eye & seq data
         return result
 
     @property
@@ -204,7 +205,10 @@ class SNXRom:
         metadata_offset = len(result)
 
         for asset in assets:
+            print(f"asset size {len(memoryview(asset).cast('B'))}")
+
             result[asset_offset_ptr:asset_offset_ptr + 4] = array.array('B', struct.pack('<L', len(result)))
+            asset_offset_ptr += 4
             result.extend(memoryview(asset).cast('B'))
             pad()
 

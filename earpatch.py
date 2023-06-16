@@ -15,11 +15,13 @@ def getFirstAU(content, assetTablePointers):
             return i, memoryview(content[o:e])
     raise ValueError("No AU chunk found in file")
 
-def arbitrary_mouth_data(duration_s):
+def arbitrary_mouth_data(duration_s, n_states=10):
+    print(f"{duration_s=}")
     duration_ms = round(duration_s * 1000)
     result = []
-    for i in range(0, duration_ms//300):
-        result.append([300, i % 3])
+    states = [0, 1, 0, 2]
+    for i in range(n_states):
+        result.append([duration_ms // n_states, states[i % 4]])
     return result
 
 @click.command
@@ -42,7 +44,9 @@ def earpatch(au, mouth, arbitrary_mouth, no_mouth, input_file, output_file):
 
     au_header = snxrom.AudioHeader.from_buffer(au_chunk)
 
-    au_payload = au_chunk[au_header.headerSize*2:au_header.headerSize*2+au_header.sizeOfAudioBinary*2]
+    au_payload = au_chunk[au_header.headerSize*2:(au_header.headerSize+au_header.sizeOfAudioBinary)*2]
+    with open("payload.au", "wb") as f: f.write(au_chunk)
+
     print(f"{len(au_payload)=}")
 
     print(f"{sizeof(au_header)=}")
@@ -50,7 +54,7 @@ def earpatch(au, mouth, arbitrary_mouth, no_mouth, input_file, output_file):
         mouth_timings = json.load(mouth)
         mouth_data = snxrom.encodeMarkTable(mouth_timings)
     elif arbitrary_mouth:
-        mouth_timings = arbitrary_mouth_data(au_header.sizeOfAudioBinary * 8 / au_header.bitRate / 10)
+        mouth_timings = arbitrary_mouth_data(au_header.sizeOfAudioBinary * 16 / au_header.bitRate / 10)
         mouth_data = bytearray(memoryview(snxrom.encodeMarkTable(mouth_timings)).cast('B'))
     elif no_mouth:
         mouth_data = b''
@@ -60,15 +64,19 @@ def earpatch(au, mouth, arbitrary_mouth, no_mouth, input_file, output_file):
     au_header.markFlag = bool(mouth_data)
     au_header.headerSize = (sizeof(au_header) + sizeof(mouth_data)) // 2 # in units of uint16
 
-    print(f"{list(memoryview(mouth_data).cast('H'))=}")
+    mouth_data_b = bytes(memoryview(mouth_data).cast('B'))
+    print(f"{len(mouth_data_b)=}")
+    print(f"{list(memoryview(mouth_data).cast('H'))=} {len(mouth_data)}")
+    print(f"{list(memoryview(mouth_data).cast('B'))=} {len(mouth_data)}")
     print(f"{au_header=}")
 
     newChunk = bytearray()
     newChunk.extend(memoryview(au_header).cast('B'))
     newChunk.extend(memoryview(mouth_data).cast('B'))
     newChunk.extend(memoryview(au_payload).cast('B'))
-    print(f"{len(au_chunk)}")
-    print(f"{len(newChunk)}")
+    print(f"Old chunk length {len(au_chunk)}")
+    print(f"New chunk length {len(newChunk)}")
+    with open("new.au", "wb") as f: f.write(newChunk)
 
     content = bytearray(content[:AUoffset])
     content.extend(memoryview(au_header).cast('B'))

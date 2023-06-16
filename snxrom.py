@@ -138,6 +138,7 @@ def parseMarkTable(data):
 
 def encodeMarkTable(data):
     result = array.array('H')
+    result.append(0)
     for (duration, state) in data:
         if duration > 0x7fff:
             durationUpper = duration >> 16
@@ -146,6 +147,7 @@ def encodeMarkTable(data):
         else:
             result.extend((duration, state))
     result.extend((0xffff, 0xffff))
+    result[0] = len(result)
     return result
 
 def fakeheader(header: AudioHeader):

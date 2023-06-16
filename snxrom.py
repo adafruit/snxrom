@@ -7,6 +7,7 @@ import _ctypes
 import struct
 from ctypes import LittleEndianStructure, c_uint8, c_int16, c_int32, c_uint16, c_uint32, sizeof, cast, byref, addressof, POINTER, string_at
 from dataclasses import dataclass
+import click
 
 AU = struct.unpack('<H', b'AU')[0]
 
@@ -135,6 +136,18 @@ def parseMarkTable(data):
             i += 3
         yield duration, identifier
 
+def encodeMarkTable(data):
+    result = array.array('H')
+    for (duration, state) in data:
+        if duration > 0x7fff:
+            durationUpper = duration >> 16
+            durationLower = duration & 0xffff
+            result.extend((durationUpper | 0x8000, durationLower, state))
+        else:
+            result.extend((duration, state))
+    result.extend((0xffff, 0xffff))
+    return result
+
 def fakeheader(header: AudioHeader):
     """A header like the one that'll be written by the audio encode, without any marks"""
     h = AudioHeader.from_buffer_copy(header)
@@ -151,6 +164,11 @@ def makeSNXROMHeader(n_asset):
     result.assetTableLength = n_asset
     result.unknown3_ff[:] = b'\xff' * 464
     return result
+
+def parseHeaderAndPointers(content):
+    header = SNXROMHeader.from_buffer(content)
+    assetTablePointers = castAfter(header, c_uint32 * header.assetTableLength)
+    return header, assetTablePointers
 
 def makeEyeData(eyeImage):
     return b'\x41\x55' * 128 * 128
@@ -251,9 +269,7 @@ class SNXRom:
     @classmethod
     def fromBuffer(cls, data):
         content = bytearray(data)
-        header = SNXROMHeader.from_buffer(content)
-        print(header)
-        assetTablePointers = castAfter(header, c_uint32 * header.assetTableLength);
+        header, assetTablePointers = parseHeaderAndPointers(content)
 
         metadata: ROMMetadata | None = None
         audioHeaders: list[AudioHeader] = []
@@ -301,7 +317,25 @@ class SNXRom:
 
         return cls(storyId=0 if metadata is None else metadata.storyId, eyeAnimations=eyeAnimations, eyeImages=eyeImages, videoAudioSequences=videoAudioSequences, marks=marks, audioHeaders=audioHeaders, audioData=audioData)
 
+@click.command
+@click.option("--infile", default=None)
+@click.option("--indir", default=None)
+@click.option("--outfile", default=None)
+@click.option("--outdir", default=None)
+def main(infile, indir, outdir, outfile):
+    if infile:
+        rom = SNXRom.fromFile(infile)
+    elif indir:
+        raise SystemExit("NYI")
+    else:
+        raise SystemExit("Specify --infile or --indir")
+
+    if outdir:
+        rom.saveDirectory(pathlib.Path(outdir))
+    if outfile:
+        rom.saveBin(pathlib.Path(outfile))
+    if not outdir and not outfile:
+        raise SystemExit("Specify --outfile or --outdir")
+
 if __name__ == '__main__':
-    rom = SNXRom.fromFile('assets/Story01.bin')
-    rom.saveDirectory(pathlib.Path('story01_out'))
-    rom.saveBin(pathlib.Path('intro_out.bin'))
+    main()

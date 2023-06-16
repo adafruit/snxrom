@@ -1,4 +1,6 @@
+#!/usr/bin/python3
 import PIL.Image
+import array
 import json
 import pathlib
 import _ctypes
@@ -41,7 +43,7 @@ class ROMMetadata(CReprMixin, LittleEndianStructure):
         ('type', c_uint16), # 0 for this block
         ('storyId', c_uint16),
         ('numberOfEyeAnimations', c_uint16),
-        ('numberOfEyeBitmap', c_uint16),
+        ('numberOfEyeImages', c_uint16),
         ('numberOfVideoSequences', c_uint16),
         ('numberOfAudioBlocks', c_uint16),
         ('fileSizeUpper', c_uint16),
@@ -108,11 +110,6 @@ class AudioHeader(CReprMixin, LittleEndianStructure):
     # followed by 0x140 bytes of "old samples"
     # followed by 2*self.sf btes of data
 
-class EyeBitmap(LittleEndianStructure):
-    _fields_ = [
-            ('pixels', c_uint16 * 16384)
-    ]
-
 def castAt(o, cls):
     r = byref(o, 0)
     return cast(r, POINTER(cls))[0]
@@ -139,14 +136,31 @@ def parseMarkTable(data):
         yield duration, identifier
 
 def fakeheader(header: AudioHeader):
+    """A header like the one that'll be written by the audio encode, without any marks"""
     h = AudioHeader.from_buffer_copy(header)
     h.markFlag = 0
     h.headerSize = 16
     return bytes(h)
 
+def makeSNXROMHeader(n_asset):
+    result = SNXROMHeader()
+    for i, c in enumerate(b'SNXROM'):
+        result.SNXROM[i] = c
+    result.unknown1_ff[:] = b'\xff' * 28
+    result.unknown2_0400 = 0x400
+    result.assetTableLength = n_asset
+    result.unknown3_ff[:] = b'\xff' * 464
+    return result
+
+def makeEyeData(eyeImage):
+    return b'\0' * 128 * 128 * 2
+
+def makeAudioAsset(header, data):
+    return b'\0'
+
 @dataclass
 class SNXRom:
-    metadata: ROMMetadata | None
+    storyId: int
     eyeAnimations: list[EyeAnimationMetadata]
     eyeImages: dict[int, PIL.Image]
     videoAudioSequences: list[VideoAudioSequenceMetadata]
@@ -154,10 +168,60 @@ class SNXRom:
     audioHeaders: list[AudioHeader]
     audioData: list[bytes]
 
+    @property
+    def metadata(self):
+        result = ROMMetadata()
+        result.storyId = self.storyId
+        result.numberOfEyeAnimations = len(self.eyeAnimations)
+        result.numberOfEyeImages = len(self.eyeImages)
+        result.numberOfVideoSequences = len(self.videoAudioSequences)
+        result.numberOfAudioBlocks = len(self.audioHeaders)
+        result.fileSizeUpper = 0 # to be filled
+        result.fileSizeLower = 0 # to be filled
+        result.unknown_ff[:] = b'\xff' * 16
+        return result
+
+    @property
+    def content(self):
+        def pad():
+            x = (-len(result) % 256)
+            result.extend(b'\0' * x)
+            assert len(result) % 256 == 0
+
+        result = array.array('B')
+        assets = []
+        assets.append(self.metadata)
+        for eyeImage in self.eyeImages:
+            assets.append(makeEyeData(eyeImage))
+        for header, data in zip(self.audioHeaders, self.audioData):
+            assets.append(makeAudioAsset(header, data))
+        n_assets = len(assets)
+
+        result.extend(memoryview(makeSNXROMHeader(n_assets)).cast('B'))
+        asset_offset_ptr = len(result)
+        result.extend(b'\0\0\0\0' * n_assets)
+        pad()
+        metadata_offset = len(result)
+
+        for asset in assets:
+            result[asset_offset_ptr:asset_offset_ptr + 4] = array.array('B', struct.pack('<L', len(result)))
+            result.extend(memoryview(asset).cast('B'))
+            pad()
+
+        metadata = SNXROMHeader.from_buffer(result, metadata_offset)
+        metadata.fileSizeUpper = len(result) >> 16
+        metadata.fileSizeLower = len(result) & 0xfff
+
+        return result
+
+    def saveBin(self, path: pathlib.Path):
+        with path.open('wb') as f:
+            f.write(self.content)
+
     def saveDirectory(self, path: pathlib.Path):
         path.mkdir(parents=True, exist_ok=True)
         story = {
-                'storyId': self.metadata.storyId,
+                'storyId': self.storyId,
                 'eyeAnimations': [animation.todict() for animation in self.eyeAnimations],
                 'videoAudioSequences': [vas.todict() for vas in self.videoAudioSequences],
                 'marks': self.marks
@@ -184,6 +248,7 @@ class SNXRom:
     def fromBuffer(cls, data):
         content = bytearray(data)
         header = SNXROMHeader.from_buffer(content)
+        print(header)
         assetTablePointers = castAfter(header, c_uint32 * header.assetTableLength);
 
         metadata: ROMMetadata | None = None
@@ -191,11 +256,12 @@ class SNXRom:
         audioData: list[bytes] = []
         marks: list[list[int]] = []
 
-        for o in assetTablePointers:
+        for o, e in zip(assetTablePointers, assetTablePointers[1:] + [len(content)]):
             asset_type = c_uint16.from_buffer(content, o)
+            print(f"asset {asset_type.value:#x} offset {o:#x} size {(e-o):#x}")
             if asset_type.value == 0:
                 metadata = ROMMetadata.from_buffer(content, o)
-            if asset_type.value == AU:
+            elif asset_type.value == AU:
                 audioHeader = AudioHeader.from_buffer(content, o)
                 audioHeaders.append(audioHeader)
                 markTableLength = castAfter(audioHeader, c_uint16 * 1)
@@ -205,6 +271,8 @@ class SNXRom:
                         castAt(audioHeader, c_uint16 * audioHeader.headerSize),
                         c_uint16 * (audioHeader.sizeOfAudioBinary))
                 audioData.append(bytes(audiodata_c))
+            else:
+                print(hex(o), hex(asset_type.value))
 
         eyeAnimations: list[EyeAnimationMetadata] = []
         videoAudioSequences: list[VideoAudioSequenceMetadata] = []
@@ -214,9 +282,11 @@ class SNXRom:
             base = metadata
             for i in range(metadata.numberOfEyeAnimations):
                 base = eye = castAfter(base, EyeAnimationMetadata)
+                print(f"eye at {addressof(eye) - addressof(header):#x}")
                 eyeAnimations.append(eye)
             for i in range(metadata.numberOfVideoSequences):
                 base = seq = castAfter(base, VideoAudioSequenceMetadata)
+                print(f"seq at {addressof(seq) - addressof(header):#x}")
                 videoAudioSequences.append(seq)
 
             for e in eyeAnimations:
@@ -225,9 +295,9 @@ class SNXRom:
                     asset = (c_uint16 * (128*128)).from_buffer(content, assetTablePointers[i])
                     eyeImages[i] = PIL.Image.frombytes('RGB', (128,128), string_at(asset, 128*128*2), 'raw', 'RGB;16')
 
-        return cls(metadata=metadata, eyeAnimations=eyeAnimations, eyeImages=eyeImages, videoAudioSequences=videoAudioSequences, marks=marks, audioHeaders=audioHeaders, audioData=audioData)
+        return cls(storyId=0 if metadata is None else metadata.storyId, eyeAnimations=eyeAnimations, eyeImages=eyeImages, videoAudioSequences=videoAudioSequences, marks=marks, audioHeaders=audioHeaders, audioData=audioData)
 
 if __name__ == '__main__':
     rom = SNXRom.fromFile('assets/Story01.bin')
     rom.saveDirectory(pathlib.Path('story01_out'))
-    #rom.save_bin('intro_out.bin')
+    rom.saveBin(pathlib.Path('intro_out.bin'))

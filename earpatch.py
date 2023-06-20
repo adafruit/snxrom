@@ -24,14 +24,27 @@ def arbitrary_mouth_data(duration_s, n_states=10):
         result.append([duration_ms // n_states, states[i % 4]])
     return result
 
+rhubarb_mouth_map = {
+        'A': 0,
+        'B': 1,
+        'C': 1,
+        'D': 2,
+        'E': 2,
+        'F': 0,
+        }
+
+def rhubarb_to_ruxpin(row):
+    return (row['end'] - row['start']) * 1000, rhubarb_mouth_map.get(row['value'])
+
 @click.command
 @click.option("--au", type=click.File('rb'), default=None)
 @click.option("--mouth", type=click.File('r'), default=None)
+@click.option("--rhubarb-json", type=click.File('r'), default=None)
 @click.option("--arbitrary-mouth", default=False, is_flag=True)
 @click.option("--no-mouth", default=False, is_flag=True)
 @click.argument("input-file", type=click.File('rb'))
 @click.argument("output-file", type=click.File('wb'))
-def earpatch(au, mouth, arbitrary_mouth, no_mouth, input_file, output_file):
+def earpatch(au, mouth, rhubarb_json, arbitrary_mouth, no_mouth, input_file, output_file):
     content = bytearray(input_file.read())
     file_header, assetTablePointers = snxrom.parseHeaderAndPointers(content)
 
@@ -50,7 +63,11 @@ def earpatch(au, mouth, arbitrary_mouth, no_mouth, input_file, output_file):
     print(f"{len(au_payload)=}")
 
     print(f"{sizeof(au_header)=}")
-    if mouth is not None:
+    if rhubarb_json is not None:
+        rhubarb_timings = json.load(rhubarb_json)
+        moutn_timings = [rhubarb_to_ruxpin(row) for row in rhubarb_timings]
+        mouth_data = snxrom.encodeMarkTable(mouth_timings)
+    elif mouth is not None:
         mouth_timings = json.load(mouth)
         mouth_data = snxrom.encodeMarkTable(mouth_timings)
     elif arbitrary_mouth:

@@ -140,6 +140,7 @@ def encodeMarkTable(data):
     result = array.array('H')
     result.append(0)
     for (duration, state) in data:
+        duration = int(duration)
         if duration > 0x7fff:
             durationUpper = duration >> 16
             durationLower = duration & 0xffff

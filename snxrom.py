@@ -5,6 +5,7 @@ import json
 import pathlib
 import _ctypes
 import struct
+import numpy
 from ctypes import LittleEndianStructure, c_uint8, c_int16, c_int32, c_uint16, c_uint32, sizeof, cast, byref, addressof, POINTER, string_at
 from dataclasses import dataclass
 import click
@@ -174,7 +175,11 @@ def parseHeaderAndPointers(content):
     return header, assetTablePointers
 
 def makeEyeData(eyeImage):
-    return b'\x41\x55' * 128 * 128
+    r = numpy.array(eyeImage.getdata(0), dtype=numpy.uint16)
+    g = numpy.array(eyeImage.getdata(1), dtype=numpy.uint16)
+    b = numpy.array(eyeImage.getdata(1), dtype=numpy.uint16)
+    rgb565 = (b >> 3) | ((g >> 2) << 5) | ((r >> 3) << 11)
+    return rgb565.tobytes()
 
 def makeAudioAsset(header, data):
     return b'\0'

@@ -1,0 +1,24 @@
+{
+    "mouthCues": [
+    { "start": 0.00, "end": 0.75, "value": "D" },
+    { "start": 0.75, "end": 1.00, "value": "A" },
+    { "start": 1.00, "end": 1.75, "value": "D" },
+    { "start": 1.75, "end": 2.00, "value": "A" },
+    { "start": 2.00, "end": 2.75, "value": "D" },
+    { "start": 2.75, "end": 3.00, "value": "A" },
+    { "start": 3.00, "end": 3.75, "value": "D" },
+    { "start": 3.75, "end": 4.00, "value": "A" },
+    { "start": 4.00, "end": 4.75, "value": "D" },
+    { "start": 4.75, "end": 5.00, "value": "A" },
+    { "start": 5.00, "end": 5.75, "value": "D" },
+    { "start": 5.75, "end": 6.00, "value": "A" },
+    { "start": 6.00, "end": 6.75, "value": "D" },
+    { "start": 6.75, "end": 7.00, "value": "A" },
+    { "start": 7.00, "end": 7.75, "value": "D" },
+    { "start": 7.75, "end": 8.00, "value": "A" },
+    { "start": 8.00, "end": 8.75, "value": "D" },
+    { "start": 8.75, "end": 9.00, "value": "A" },
+    { "start": 9.00, "end": 9.75, "value": "D" },
+    { "start": 9.75, "end": 10.00, "value": "A" }
+    ]
+}

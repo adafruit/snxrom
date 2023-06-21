@@ -24,27 +24,50 @@ def arbitrary_mouth_data(duration_s, n_states=10):
         result.append([duration_ms // n_states, states[i % 4]])
     return result
 
+OPEN, MIDDLE, CLOSED = range(3)
+
 rhubarb_mouth_map = {
-        'A': 0,
-        'B': 1,
-        'C': 1,
-        'D': 2,
-        'E': 2,
-        'F': 0,
+        'A': CLOSED,
+        'B': MIDDLE,
+        'C': MIDDLE,
+        'D': OPEN,
+        'E': OPEN,
+        'F': CLOSED,
         }
 
-def rhubarb_to_ruxpin(row):
-    return (row['end'] - row['start']) * 1000, rhubarb_mouth_map.get(row['value'])
+def rhubarb_to_ruxpin(rhubarb_json):
+    last = 0
+    result = []
+    for row in rhubarb_json['mouthCues']:
+        end = round(row['end'] * 1000) # stamps are said to be in "ms"
+        start = round(row['start'] * 1000)
+        if start != last:  # mouth closed during time without viseme
+            duration = start - last
+            result.append((duration, 0))
+            last = start
+
+        value = rhubarb_mouth_map[row['value']]
+        duration = end - last
+        last = end
+        result.append((duration, value))
+    i = 0
+    print(result)
+    while i+1 < len(result):
+        if result[i][1] == result[i+1][1]:
+            result[i] = (result[i][0] + result[i+1][0], result[i][1])
+            del result[i+1]
+        else:
+            i += 1
+    print(result)
+    return result
 
 @click.command
-@click.option("--au", type=click.File('rb'), default=None)
-@click.option("--mouth", type=click.File('r'), default=None)
-@click.option("--rhubarb-json", type=click.File('r'), default=None)
-@click.option("--arbitrary-mouth", default=False, is_flag=True)
-@click.option("--no-mouth", default=False, is_flag=True)
+@click.option("--au", type=click.File('rb'), default=None, help="Previously converted sound file with 'AU' magic header")
+@click.option("--rhubarb-json", type=click.File('r'), default=None, help="Rhubarb json file for mouth positions")
+@click.option("--no-mouth", default=False, is_flag=True, help="Just keep your mouth shut")
 @click.argument("input-file", type=click.File('rb'))
 @click.argument("output-file", type=click.File('wb'))
-def earpatch(au, mouth, rhubarb_json, arbitrary_mouth, no_mouth, input_file, output_file):
+def earpatch(au, rhubarb_json, no_mouth, input_file, output_file):
     content = bytearray(input_file.read())
     file_header, assetTablePointers = snxrom.parseHeaderAndPointers(content)
 
@@ -65,14 +88,8 @@ def earpatch(au, mouth, rhubarb_json, arbitrary_mouth, no_mouth, input_file, out
     print(f"{sizeof(au_header)=}")
     if rhubarb_json is not None:
         rhubarb_timings = json.load(rhubarb_json)
-        moutn_timings = [rhubarb_to_ruxpin(row) for row in rhubarb_timings]
+        mouth_timings = rhubarb_to_ruxpin(rhubarb_timings)
         mouth_data = snxrom.encodeMarkTable(mouth_timings)
-    elif mouth is not None:
-        mouth_timings = json.load(mouth)
-        mouth_data = snxrom.encodeMarkTable(mouth_timings)
-    elif arbitrary_mouth:
-        mouth_timings = arbitrary_mouth_data(au_header.sizeOfAudioBinary * 16 / au_header.bitRate / 10)
-        mouth_data = bytearray(memoryview(snxrom.encodeMarkTable(mouth_timings)).cast('B'))
     elif no_mouth:
         mouth_data = b''
     else:
@@ -81,10 +98,8 @@ def earpatch(au, mouth, rhubarb_json, arbitrary_mouth, no_mouth, input_file, out
     au_header.markFlag = bool(mouth_data)
     au_header.headerSize = (sizeof(au_header) + sizeof(mouth_data)) // 2 # in units of uint16
 
-    mouth_data_b = bytes(memoryview(mouth_data).cast('B'))
-    print(f"{len(mouth_data_b)=}")
-    print(f"{list(memoryview(mouth_data).cast('H'))=} {len(mouth_data)}")
-    print(f"{list(memoryview(mouth_data).cast('B'))=} {len(mouth_data)}")
+    mouth_data_b = bytes(memoryview(mouth_data).cast('b'))
+    print(f"{mouth_data=}")
     print(f"{au_header=}")
 
     newChunk = bytearray()

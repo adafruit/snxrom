@@ -25,25 +25,49 @@ def arbitrary_mouth_data(duration_s, n_states=10):
         result.append([duration_ms // n_states, states[i % 4]])
     return result
 
-OPEN, MIDDLE, CLOSED = range(3)
+# On my bear, code 2 goes past "mouth open" and starts to close again,
+# so I'm calling that "middle".
+CLOSED, OPEN, MIDDLE = range(3)
+
+# To go from state X to state Y, start LATENCY[X][Y]ms earlier than what the
+# rhubarb data says
+LATENCY = {
+    CLOSED: {
+        CLOSED: 0, OPEN: 200, MIDDLE: 200,
+    },
+    OPEN: {
+        CLOSED: 200, OPEN: 0, MIDDLE: 0,
+    },
+    MIDDLE: {
+        CLOSED: 200, OPEN: 150, MIDDLE: 0,
+    }
+}
 
 rhubarb_mouth_map = {
         'A': CLOSED,
+        'F': CLOSED,
+        'X': CLOSED,
+
         'B': MIDDLE,
         'C': MIDDLE,
+        'G': MIDDLE,
+        'H': MIDDLE,
+
         'D': OPEN,
         'E': OPEN,
-        'F': CLOSED,
         }
 
 def rhubarb_to_timestamp(rhubarb_json):
     last = 0
     result = [(0, CLOSED)]
+    old_value = CLOSED
     for row in rhubarb_json['mouthCues']:
         start = round(row['start'] * 1000)
         value = rhubarb_mouth_map[row['value']]
-        if value != result[-1][1]:
+        if value != old_value:
+            start = max(last, start - LATENCY[old_value][value])
             result.append((start, value))
+        old_value = value
     return result
 
 def random_eye_timestamp(duration_ms):

@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import json
+import random
 import ctypes
 import struct
 import snxrom
@@ -35,39 +36,40 @@ rhubarb_mouth_map = {
         'F': CLOSED,
         }
 
-def rhubarb_to_ruxpin(rhubarb_json):
+def rhubarb_to_timestamp(rhubarb_json):
+    last = 0
+    result = [(0, CLOSED)]
+    for row in rhubarb_json['mouthCues']:
+        start = round(row['start'] * 1000)
+        value = rhubarb_mouth_map[row['value']]
+        if value != result[-1][1]:
+            result.append((start, value))
+    return result
+
+def random_eye_timestamp(duration_ms):
+    now = 0
+    result = [(0, 11)]
+    while now < duration_ms:
+        now += random.randint(250, 1000)
+        result.append((now, random.randint(11, 14)))
+    return result
+
+def timestamp_to_delay(seq):
     last = 0
     result = []
-    for row in rhubarb_json['mouthCues']:
-        end = round(row['end'] * 1000) # stamps are said to be in "ms"
-        start = round(row['start'] * 1000)
-        if start != last:  # mouth closed during time without viseme
-            duration = start - last
-            result.append((duration, 0))
-            last = start
-
-        value = rhubarb_mouth_map[row['value']]
-        duration = end - last
-        last = end
-        result.append((duration, value))
-    i = 0
-    print(result)
-    while i+1 < len(result):
-        if result[i][1] == result[i+1][1]:
-            result[i] = (result[i][0] + result[i+1][0], result[i][1])
-            del result[i+1]
-        else:
-            i += 1
-    print(result)
+    for now, action in seq:
+        result.append((now-last, action))
+        last = now
     return result
 
 @click.command
 @click.option("--au", type=click.File('rb'), default=None, help="Previously converted sound file with 'AU' magic header")
 @click.option("--rhubarb-json", type=click.File('r'), default=None, help="Rhubarb json file for mouth positions")
 @click.option("--no-mouth", default=False, is_flag=True, help="Just keep your mouth shut")
+@click.option("--random-eyes", default=False, is_flag=True, help="Use random eye animations (default: None)")
 @click.argument("input-file", type=click.File('rb'))
 @click.argument("output-file", type=click.File('wb'))
-def earpatch(au, rhubarb_json, no_mouth, input_file, output_file):
+def earpatch(au, rhubarb_json, no_mouth, random_eyes, input_file, output_file):
     content = bytearray(input_file.read())
     file_header, assetTablePointers = snxrom.parseHeaderAndPointers(content)
 
@@ -79,6 +81,7 @@ def earpatch(au, rhubarb_json, no_mouth, input_file, output_file):
         au_chunk = bytearray(au.read())
 
     au_header = snxrom.AudioHeader.from_buffer(au_chunk)
+    duration_ms = round(au_header.sizeOfAudioBinary * 16 * 100 / au_header.bitRate)
 
     au_payload = au_chunk[au_header.headerSize*2:(au_header.headerSize+au_header.sizeOfAudioBinary)*2]
     with open("payload.au", "wb") as f: f.write(au_chunk)
@@ -88,23 +91,30 @@ def earpatch(au, rhubarb_json, no_mouth, input_file, output_file):
     print(f"{sizeof(au_header)=}")
     if rhubarb_json is not None:
         rhubarb_timings = json.load(rhubarb_json)
-        mouth_timings = rhubarb_to_ruxpin(rhubarb_timings)
-        mouth_data = snxrom.encodeMarkTable(mouth_timings)
+        mouth_timings = rhubarb_to_timestamp(rhubarb_timings)
+        if random_eyes:
+            eye_timings = random_eye_timestamp(duration_ms)
+        else:
+            eye_timings = []
+        print(mouth_timings)
+        print(eye_timings)
+        mark_timings = timestamp_to_delay(sorted(mouth_timings + eye_timings))
+        print(mark_timings)
+        mark_data = snxrom.encodeMarkTable(mark_timings)
     elif no_mouth:
-        mouth_data = b''
+        mark_data = b''
     else:
-        mouth_data = au_chunk[32:au_header.headerSize*2]
+        mark_data = au_chunk[32:au_header.headerSize*2]
 
-    au_header.markFlag = bool(mouth_data)
-    au_header.headerSize = (sizeof(au_header) + sizeof(mouth_data)) // 2 # in units of uint16
+    au_header.markFlag = bool(mark_data)
+    au_header.headerSize = (sizeof(au_header) + sizeof(mark_data)) // 2 # in units of uint16
 
-    mouth_data_b = bytes(memoryview(mouth_data).cast('b'))
-    print(f"{mouth_data=}")
+    print(f"{mark_data=}")
     print(f"{au_header=}")
 
     newChunk = bytearray()
     newChunk.extend(memoryview(au_header).cast('B'))
-    newChunk.extend(memoryview(mouth_data).cast('B'))
+    newChunk.extend(memoryview(mark_data).cast('B'))
     newChunk.extend(memoryview(au_payload).cast('B'))
     print(f"Old chunk length {len(au_chunk)}")
     print(f"New chunk length {len(newChunk)}")
@@ -112,7 +122,7 @@ def earpatch(au, rhubarb_json, no_mouth, input_file, output_file):
 
     content = bytearray(content[:AUoffset])
     content.extend(memoryview(au_header).cast('B'))
-    content.extend(memoryview(mouth_data).cast('B'))
+    content.extend(memoryview(mark_data).cast('B'))
     content.extend(memoryview(au_payload).cast('B'))
 
     if len(content) % 512 != 0:

@@ -16,15 +16,6 @@ def getFirstAU(content, assetTablePointers):
             return i, memoryview(content[o:e])
     raise ValueError("No AU chunk found in file")
 
-def arbitrary_mouth_data(duration_s, n_states=10):
-    print(f"{duration_s=}")
-    duration_ms = round(duration_s * 1000)
-    result = []
-    states = [0, 1, 0, 2]
-    for i in range(n_states):
-        result.append([duration_ms // n_states, states[i % 4]])
-    return result
-
 # On my bear, code 2 goes past "mouth open" and starts to close again,
 # so I'm calling that "middle".
 CLOSED, OPEN, MIDDLE = range(3)
@@ -70,12 +61,12 @@ def rhubarb_to_timestamp(rhubarb_json):
         old_value = value
     return result
 
-def random_eye_timestamp(duration_ms):
+def random_eye_timestamp(duration_ms, random_eyes_median, random_eyes_std_dev):
     now = 0
-    result = [(0, 11)]
+    result = [(0, 11)] # Start with an animation
     while now < duration_ms:
-        now += random.randint(250, 1000)
-        result.append((now, random.randint(11, 14)))
+        now += int(random.gauss(random_eyes_median, random_eyes_std_dev) * 1000)
+        result.append((now, random.randint(11, 14))) # Assume these are the valid animation numbers (true for Intro.bin)
     return result
 
 def timestamp_to_delay(seq):
@@ -91,9 +82,11 @@ def timestamp_to_delay(seq):
 @click.option("--rhubarb-json", type=click.File('r'), default=None, help="Rhubarb json file for mouth positions")
 @click.option("--no-mouth", default=False, is_flag=True, help="Just keep your mouth shut")
 @click.option("--random-eyes", default=False, is_flag=True, help="Use random eye animations (default: None)")
+@click.option("--random-eyes-median", default=30, help="The median time between eye animations")
+@click.option("--random-eyes-std-dev", default=6, help="The standard deviation of the animation time")
 @click.argument("input-file", type=click.File('rb'))
 @click.argument("output-file", type=click.File('wb'))
-def earpatch(au, rhubarb_json, no_mouth, random_eyes, input_file, output_file):
+def earpatch(au, rhubarb_json, no_mouth, random_eyes, random_eyes_median, random_eyes_std_dev, input_file, output_file):
     content = bytearray(input_file.read())
     file_header, assetTablePointers = snxrom.parseHeaderAndPointers(content)
 
@@ -110,20 +103,14 @@ def earpatch(au, rhubarb_json, no_mouth, random_eyes, input_file, output_file):
     au_payload = au_chunk[au_header.headerSize*2:(au_header.headerSize+au_header.sizeOfAudioBinary)*2]
     with open("payload.au", "wb") as f: f.write(au_chunk)
 
-    print(f"{len(au_payload)=}")
-
-    print(f"{sizeof(au_header)=}")
     if rhubarb_json is not None:
         rhubarb_timings = json.load(rhubarb_json)
         mouth_timings = rhubarb_to_timestamp(rhubarb_timings)
         if random_eyes:
-            eye_timings = random_eye_timestamp(duration_ms)
+            eye_timings = random_eye_timestamp(duration_ms, random_eyes_median, random_eyes_std_dev)
         else:
             eye_timings = []
-        print(mouth_timings)
-        print(eye_timings)
         mark_timings = timestamp_to_delay(sorted(mouth_timings + eye_timings))
-        print(mark_timings)
         mark_data = snxrom.encodeMarkTable(mark_timings)
     elif no_mouth:
         mark_data = b''
@@ -132,9 +119,6 @@ def earpatch(au, rhubarb_json, no_mouth, random_eyes, input_file, output_file):
 
     au_header.markFlag = bool(mark_data)
     au_header.headerSize = (sizeof(au_header) + sizeof(mark_data)) // 2 # in units of uint16
-
-    print(f"{mark_data=}")
-    print(f"{au_header=}")
 
     newChunk = bytearray()
     newChunk.extend(memoryview(au_header).cast('B'))

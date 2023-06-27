@@ -65,7 +65,8 @@ def random_eye_timestamp(duration_ms, random_eyes_median, random_eyes_std_dev):
     now = 0
     result = [(0, 11)] # Start with an animation
     while now < duration_ms:
-        now += int(random.gauss(random_eyes_median, random_eyes_std_dev) * 1000)
+        delta = random.gauss(random_eyes_median, random_eyes_std_dev) * 1000
+        now += int(max(0, delta))
         result.append((now, random.randint(11, 14))) # Assume these are the valid animation numbers (true for Intro.bin)
     return result
 
@@ -81,9 +82,9 @@ def timestamp_to_delay(seq):
 @click.option("--au", type=click.File('rb'), default=None, help="Previously converted sound file with 'AU' magic header")
 @click.option("--rhubarb-json", type=click.File('r'), default=None, help="Rhubarb json file for mouth positions")
 @click.option("--no-mouth", default=False, is_flag=True, help="Just keep your mouth shut")
-@click.option("--random-eyes", default=False, is_flag=True, help="Use random eye animations (default: None)")
-@click.option("--random-eyes-median", default=30, help="The median time between eye animations")
-@click.option("--random-eyes-std-dev", default=6, help="The standard deviation of the animation time")
+@click.option("--random-eyes/--no-random-eyes", default=True, is_flag=True, help="Use random eye animations (default: None)")
+@click.option("--random-eyes-median", default=30., help="The median time between eye animations")
+@click.option("--random-eyes-std-dev", default=6., help="The standard deviation of the animation time")
 @click.argument("input-file", type=click.File('rb'))
 @click.argument("output-file", type=click.File('wb'))
 def earpatch(au, rhubarb_json, no_mouth, random_eyes, random_eyes_median, random_eyes_std_dev, input_file, output_file):

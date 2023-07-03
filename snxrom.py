@@ -86,7 +86,7 @@ class VideoAudioSequenceMetadata(CReprMixin, LittleEndianStructure):
 class AudioHeader(CReprMixin, LittleEndianStructure):
     _hide_ = ['AU', 'padding']
     _fields_ = [
-            ('AU', c_uint8 * 2),
+            ('AU', c_uint16),
             ('sampleRate', c_uint16),
             ('bitRate', c_uint16),
             ('channels', c_uint16),

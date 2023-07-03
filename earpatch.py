@@ -1,8 +1,9 @@
 #!/usr/bin/python3
+import ctypes
 import json
 import random
-import ctypes
 import struct
+import wave
 import snxrom
 import click
 
@@ -80,6 +81,7 @@ def timestamp_to_delay(seq):
 
 @click.command
 @click.option("--au", type=click.File('rb'), default=None, help="Previously converted sound file with 'AU' magic header")
+@click.option("--wav", type=wave.open, default=None, help="Wave file, 16-bit mono at 16kHz")
 @click.option("--rhubarb-json", type=click.File('r'), default=None, help="Rhubarb json file for mouth positions")
 @click.option("--no-mouth", default=False, is_flag=True, help="Just keep your mouth shut")
 @click.option("--random-eyes/--no-random-eyes", default=True, is_flag=True, help="Use random eye animations (default: None)")
@@ -87,7 +89,7 @@ def timestamp_to_delay(seq):
 @click.option("--random-eyes-std-dev", default=6., help="The standard deviation of the animation time")
 @click.argument("input-file", type=click.File('rb'))
 @click.argument("output-file", type=click.File('wb'))
-def earpatch(au, rhubarb_json, no_mouth, random_eyes, random_eyes_median, random_eyes_std_dev, input_file, output_file):
+def earpatch(au, wav, rhubarb_json, no_mouth, random_eyes, random_eyes_median, random_eyes_std_dev, input_file, output_file):
     content = bytearray(input_file.read())
     file_header, assetTablePointers = snxrom.parseHeaderAndPointers(content)
 
@@ -97,12 +99,21 @@ def earpatch(au, rhubarb_json, no_mouth, random_eyes, random_eyes_median, random
 
     if au is not None:
         au_chunk = bytearray(au.read())
+        au_header = snxrom.AudioHeader.from_buffer(au_chunk)
+        au_payload = au_chunk[au_header.headerSize*2:(au_header.headerSize+au_header.sizeOfAudioBinary)*2]
+        print(au_header, au_header.padding)
+        duration_ms = round(au_header.sizeOfAudioBinary * 16 * 100 / au_header.bitRate)
+    elif wav is not None:
+        import g722_1_mod as m
+        wav_params = wav.getparams()
+        assert wav_params.framerate == 16000
+        assert wav_params.sampwidth == 2
+        assert wav_params.nchannels == 1
 
-    au_header = snxrom.AudioHeader.from_buffer(au_chunk)
-    duration_ms = round(au_header.sizeOfAudioBinary * 16 * 100 / au_header.bitRate)
-
-    au_payload = au_chunk[au_header.headerSize*2:(au_header.headerSize+au_header.sizeOfAudioBinary)*2]
-    with open("payload.au", "wb") as f: f.write(au_chunk)
+        samples = wav.readframes(wav.getnframes())
+        au_payload = m.encode(samples, 320, 40)
+        duration_ms = wav.getnframes() / 16
+        au_header = snxrom.AudioHeader(snxrom.AU, sampleRate=wav_params.framerate, bitRate=1600, channels=1, totalAudioFrames=len(au_payload) // 40, sizeOfAudioBinary = len(au_payload) // 2, markFlag=True, silenceFlag=False, headerSize=16, audio32Type=0xffff, padding=0xffff)
 
     if rhubarb_json is not None:
         rhubarb_timings = json.load(rhubarb_json)

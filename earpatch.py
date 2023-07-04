@@ -106,14 +106,23 @@ def earpatch(au, wav, rhubarb_json, no_mouth, random_eyes, random_eyes_median, r
     elif wav is not None:
         import g722_1_mod as m
         wav_params = wav.getparams()
-        assert wav_params.framerate == 16000
+        assert wav_params.framerate in (16000, 32000)
         assert wav_params.sampwidth == 2
         assert wav_params.nchannels == 1
 
         samples = wav.readframes(wav.getnframes())
-        au_payload = m.encode(samples, 320, 40)
+        if wav_params.framerate >= 24000:
+            bitRate = 3200
+            inchunksize = 640
+            outchunksize = 80
+        else:
+            bitRate = 1600
+            inchunksize = 320
+            outchunksize = 40
+        au_payload = m.encode(samples, inchunksize, outchunksize)
         duration_ms = wav.getnframes() / 16
-        au_header = snxrom.AudioHeader(snxrom.AU, sampleRate=wav_params.framerate, bitRate=1600, channels=1, totalAudioFrames=len(au_payload) // 40, sizeOfAudioBinary = len(au_payload) // 2, markFlag=True, silenceFlag=False, headerSize=16, audio32Type=0xffff, padding=0xffff)
+
+        au_header = snxrom.AudioHeader(snxrom.AU, sampleRate=wav_params.framerate, bitRate=bitRate, channels=1, totalAudioFrames=len(au_payload) // outchunksize, sizeOfAudioBinary = len(au_payload) // 2, markFlag=True, silenceFlag=False, headerSize=16, audio32Type=0xffff, padding=0xffff)
 
     if rhubarb_json is not None:
         rhubarb_timings = json.load(rhubarb_json)

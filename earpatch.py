@@ -64,11 +64,11 @@ def rhubarb_to_timestamp(rhubarb_json):
 
 def random_eye_timestamp(duration_ms, random_eyes_median, random_eyes_std_dev):
     now = 0
-    result = [(0, 11)] # Start with an animation
+    result = [(0, random.randint(12,14))] # Start with an animation
     while now < duration_ms:
         delta = random.gauss(random_eyes_median, random_eyes_std_dev) * 1000
         now += int(max(0, delta))
-        result.append((now, random.randint(11, 14))) # Assume these are the valid animation numbers (true for Intro.bin)
+        result.append((now, random.randint(12, 14))) # Assume these are the valid animation numbers (true for Intro.bin)
     return result
 
 def timestamp_to_delay(seq):
@@ -110,7 +110,9 @@ def earpatch(au, wav, rhubarb_json, no_mouth, random_eyes, random_eyes_median, r
         assert wav_params.sampwidth == 2
         assert wav_params.nchannels == 1
 
-        samples = wav.readframes(wav.getnframes())
+        nframes = wav.getnframes()
+        duration_ms = nframes * 1000 / wav_params.framerate
+        samples = wav.readframes(nframes)
         if wav_params.framerate >= 24000:
             bitRate = 3200
             inchunksize = 640
@@ -120,21 +122,28 @@ def earpatch(au, wav, rhubarb_json, no_mouth, random_eyes, random_eyes_median, r
             inchunksize = 320
             outchunksize = 40
         au_payload = m.encode(samples, inchunksize, outchunksize)
-        duration_ms = wav.getnframes() / 16
-
+        print(f"{duration_ms=}")
         au_header = snxrom.AudioHeader(snxrom.AU, sampleRate=wav_params.framerate, bitRate=bitRate, channels=1, totalAudioFrames=len(au_payload) // outchunksize, sizeOfAudioBinary = len(au_payload) // 2, markFlag=True, silenceFlag=False, headerSize=16, audio32Type=0xffff, padding=0xffff)
 
     if rhubarb_json is not None:
         rhubarb_timings = json.load(rhubarb_json)
+    elif no_mouth:
+        rhubarb_timings = {'mouth_cues': []}
+    else:
+        rhubarb_timings = None
+
+    if rhubarb_timings is not None:
         mouth_timings = rhubarb_to_timestamp(rhubarb_timings)
+        print(f"{mouth_timings=}")
         if random_eyes:
             eye_timings = random_eye_timestamp(duration_ms, random_eyes_median, random_eyes_std_dev)
         else:
             eye_timings = []
+        print(f"{eye_timings=}")
         mark_timings = timestamp_to_delay(sorted(mouth_timings + eye_timings))
+        print(f"{mark_timings=}")
         mark_data = snxrom.encodeMarkTable(mark_timings)
-    elif no_mouth:
-        mark_data = b''
+        print(f"{mark_data=}")
     else:
         mark_data = au_chunk[32:au_header.headerSize*2]
 
@@ -147,7 +156,6 @@ def earpatch(au, wav, rhubarb_json, no_mouth, random_eyes, random_eyes_median, r
     newChunk.extend(memoryview(au_payload).cast('B'))
     print(f"Old chunk length {len(au_chunk)}")
     print(f"New chunk length {len(newChunk)}")
-    with open("new.au", "wb") as f: f.write(newChunk)
 
     content = bytearray(content[:AUoffset])
     content.extend(memoryview(au_header).cast('B'))

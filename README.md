@@ -18,4 +18,17 @@ python3 earpatch.py  --wav audio.wav --rhubarb-json mouth.json orig/Intro.bin In
 
 Your new file will be played in lieu of the original Intro.
 
+Installation troubleshooting:
+
+If you get this error:
+```
+Traceback (most recent call last):
+  File "earpatch.py", line 170, in <module>
+    earpatch()
+TypeError: command.<locals>.decorator() missing 1 required positional argument: 'f'
+```
+
+Make sure you use click version 8.1 or above.
+This command can help: `pip install -U click`
+
 License: MIT

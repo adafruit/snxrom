@@ -321,7 +321,7 @@ class SNXRom:
                 for i in range(e.startEyeId, e.startEyeId + e.numberOfEyeFrames):
                     if i in eyeImages: continue
                     asset = (c_uint16 * (128*128)).from_buffer(content, assetTablePointers[i])
-                    eyeImages[i] = PIL.Image.frombytes('RGB', (128,128), string_at(asset, 128*128*2), 'raw', 'RGB;16')
+                    eyeImages[i] = PIL.Image.frombytes('RGB', (128,128), string_at(asset, 128*128*2), 'raw', 'BGR;16')
 
         return cls(storyId=0 if metadata is None else metadata.storyId, eyeAnimations=eyeAnimations, eyeImages=eyeImages, videoAudioSequences=videoAudioSequences, marks=marks, audioHeaders=audioHeaders, audioData=audioData)
 
